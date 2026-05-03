@@ -1,7 +1,10 @@
 import * as vscode from "vscode";
 import { OpenCodeProvider, TaskItem } from "./opencodeProvider";
 
-async function runCompleteFunction(provider: OpenCodeProvider, additionalPrompt?: string) {
+async function runCompleteFunction(
+  provider: OpenCodeProvider,
+  additionalPrompt?: string,
+) {
   const editor = vscode.window.activeTextEditor;
 
   if (!editor) {
@@ -23,12 +26,8 @@ async function runCompleteFunction(provider: OpenCodeProvider, additionalPrompt?
   const filePath = vscode.workspace.asRelativePath(document.uri);
   const lineNumber = position.line + 1;
 
-  const functionNameMatch = lineText.match(
-    /([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(/,
-  );
-  const functionName = functionNameMatch
-    ? functionNameMatch[1]
-    : "Function";
+  const functionNameMatch = lineText.match(/([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(/);
+  const functionName = functionNameMatch ? functionNameMatch[1] : "Function";
 
   let message = `File: ${filePath}, Line: ${lineNumber}, Content: ${lineText}`;
   if (additionalPrompt) {
