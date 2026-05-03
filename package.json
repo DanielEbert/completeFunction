@@ -12,12 +12,79 @@
   "activationEvents": [],
   "main": "./dist/extension.js",
   "contributes": {
+    "configuration": {
+      "title": "OpenCode",
+      "properties": {
+        "opencode.model": {
+          "type": "string",
+          "default": "google/gemini-3.1-pro-preview",
+          "description": "The AI model to use for OpenCode"
+        }
+      }
+    },
+    "viewsContainers": {
+      "activitybar": [
+        {
+          "id": "opencode-sidebar",
+          "title": "OpenCode",
+          "icon": "$(zap)"
+        }
+      ]
+    },
+    "views": {
+      "opencode-sidebar": [
+        {
+          "id": "opencode.tasks",
+          "name": "Requests"
+        }
+      ]
+    },
     "commands": [
       {
         "command": "opencode.completeFunction",
         "title": "OpenCode: Complete Current Function"
+      },
+      {
+        "command": "opencode.showOutput",
+        "title": "Show Output",
+        "icon": "$(output)"
+      },
+      {
+        "command": "opencode.jumpToImplementation",
+        "title": "Jump to Implementation",
+        "icon": "$(go-to-file)"
+      },
+      {
+        "command": "opencode.cancelTask",
+        "title": "Cancel Task",
+        "icon": "$(stop)"
+      },
+      {
+        "command": "opencode.selectModel",
+        "title": "Select Model",
+        "icon": "$(hubot)"
       }
     ],
+    "menus": {
+      "view/title": [
+        {
+          "command": "opencode.selectModel",
+          "when": "view == opencode.tasks",
+          "group": "navigation"
+        }
+      ],
+      "view/item/context": [
+        {
+          "command": "opencode.jumpToImplementation",
+          "when": "view == opencode.tasks"
+        },
+        {
+          "command": "opencode.cancelTask",
+          "when": "view == opencode.tasks && viewItem == running",
+          "group": "inline"
+        }
+      ]
+    },
     "keybindings": [
       {
         "command": "opencode.completeFunction",
