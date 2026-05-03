@@ -1,6 +1,87 @@
 import * as vscode from "vscode";
 import { OpenCodeProvider, TaskItem } from "./opencodeProvider";
 
+async function runCompleteFunction(provider: OpenCodeProvider, additionalPrompt?: string) {
+  const editor = vscode.window.activeTextEditor;
+
+  if (!editor) {
+    vscode.window.showErrorMessage("No active text editor found.");
+    return;
+  }
+
+  const document = editor.document;
+  const position = editor.selection.active;
+  const lineText = document.lineAt(position.line).text.trim();
+
+  if (!lineText) {
+    vscode.window.showWarningMessage(
+      "The current line is empty. Please place your cursor on a function signature.",
+    );
+    return;
+  }
+
+  const filePath = vscode.workspace.asRelativePath(document.uri);
+  const lineNumber = position.line + 1;
+
+  const functionNameMatch = lineText.match(
+    /([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(/,
+  );
+  const functionName = functionNameMatch
+    ? functionNameMatch[1]
+    : "Function";
+
+  let message = `File: ${filePath}, Line: ${lineNumber}, Content: ${lineText}`;
+  if (additionalPrompt) {
+    message += `\nAdditional Instructions: ${additionalPrompt}`;
+  }
+
+  const config = vscode.workspace.getConfiguration("opencode");
+  const modelString =
+    config.get<string>("model") || "google/gemini-3.1-pro-preview";
+
+  const taskId = Date.now().toString();
+  const taskItem = new TaskItem(
+    taskId,
+    functionName,
+    document.uri.fsPath,
+    lineNumber,
+    "running",
+  );
+
+  const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
+  const scope = workspaceFolder || vscode.TaskScope.Global;
+
+  const shellExec = new vscode.ShellExecution("opencode", [
+    "run",
+    "--agent",
+    "implement",
+    "--model",
+    modelString,
+    "--thinking",
+    message,
+  ]);
+
+  const task = new vscode.Task(
+    { type: "opencode", taskId: taskId },
+    scope,
+    `Implement ${functionName}`,
+    "OpenCode",
+    shellExec,
+  );
+
+  task.presentationOptions = {
+    reveal: vscode.TaskRevealKind.Always,
+    panel: vscode.TaskPanelKind.Shared,
+    focus: true,
+  };
+
+  provider.addTask(taskItem);
+
+  vscode.tasks.executeTask(task).then((execution) => {
+    taskItem.execution = execution;
+  });
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const provider = new OpenCodeProvider();
   vscode.window.registerTreeDataProvider("opencode.tasks", provider);
@@ -8,80 +89,21 @@ export function activate(context: vscode.ExtensionContext) {
   let disposableComplete = vscode.commands.registerCommand(
     "opencode.completeFunction",
     () => {
-      const editor = vscode.window.activeTextEditor;
+      runCompleteFunction(provider);
+    },
+  );
 
-      if (!editor) {
-        vscode.window.showErrorMessage("No active text editor found.");
-        return;
-      }
-
-      const document = editor.document;
-      const position = editor.selection.active;
-      const lineText = document.lineAt(position.line).text.trim();
-
-      if (!lineText) {
-        vscode.window.showWarningMessage(
-          "The current line is empty. Please place your cursor on a function signature.",
-        );
-        return;
-      }
-
-      const filePath = vscode.workspace.asRelativePath(document.uri);
-      const lineNumber = position.line + 1;
-
-      const functionNameMatch = lineText.match(
-        /([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(/,
-      );
-      const functionName = functionNameMatch
-        ? functionNameMatch[1]
-        : "Function";
-
-      const message = `File: ${filePath}, Line: ${lineNumber}, Content: ${lineText}`;
-      const config = vscode.workspace.getConfiguration("opencode");
-      const modelString =
-        config.get<string>("model") || "google/gemini-3.1-pro-preview";
-
-      const taskId = Date.now().toString();
-      const taskItem = new TaskItem(
-        taskId,
-        functionName,
-        document.uri.fsPath,
-        lineNumber,
-        "running",
-      );
-
-      const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
-      const scope = workspaceFolder || vscode.TaskScope.Global;
-
-      const shellExec = new vscode.ShellExecution("opencode", [
-        "run",
-        "--agent",
-        "implement",
-        "--model",
-        modelString,
-        "--thinking",
-        message,
-      ]);
-
-      const task = new vscode.Task(
-        { type: "opencode", taskId: taskId },
-        scope,
-        `Implement ${functionName}`,
-        "OpenCode",
-        shellExec,
-      );
-
-      task.presentationOptions = {
-        reveal: vscode.TaskRevealKind.Always,
-        panel: vscode.TaskPanelKind.Shared,
-        focus: true,
-      };
-
-      provider.addTask(taskItem);
-
-      vscode.tasks.executeTask(task).then((execution) => {
-        taskItem.execution = execution;
+  let disposableCompleteWithPrompt = vscode.commands.registerCommand(
+    "opencode.completeFunctionWithPrompt",
+    async () => {
+      const prompt = await vscode.window.showInputBox({
+        prompt: "Additional context or instructions for OpenCode",
+        placeHolder: "e.g., Use a binary search algorithm",
       });
+
+      if (prompt !== undefined) {
+        runCompleteFunction(provider, prompt);
+      }
     },
   );
 
@@ -175,6 +197,7 @@ export function activate(context: vscode.ExtensionContext) {
 
   context.subscriptions.push(
     disposableComplete,
+    disposableCompleteWithPrompt,
     disposableTaskEnd,
     disposableShowOutput,
     disposableJump,

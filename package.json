@@ -45,6 +45,10 @@
         "title": "OpenCode: Complete Current Function"
       },
       {
+        "command": "opencode.completeFunctionWithPrompt",
+        "title": "OpenCode: Complete Current Function (with prompt)"
+      },
+      {
         "command": "opencode.showOutput",
         "title": "Show Output",
         "icon": "$(output)"
@@ -90,6 +94,12 @@
         "command": "opencode.completeFunction",
         "key": "ctrl+shift+o",
         "mac": "cmd+shift+o",
+        "when": "editorTextFocus"
+      },
+      {
+        "command": "opencode.completeFunctionWithPrompt",
+        "key": "ctrl+alt+o",
+        "mac": "cmd+alt+o",
         "when": "editorTextFocus"
       }
     ]
