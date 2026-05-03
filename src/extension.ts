@@ -1,5 +1,83 @@
 import * as vscode from "vscode";
-import { OpenCodeProvider, TaskItem } from "./opencodeProvider";
+import {
+  OpenCodeProvider,
+  TaskItem,
+  PersistedTaskItem,
+} from "./opencodeProvider";
+
+const PERSISTED_TASKS_KEY = "opencode.tasks.history";
+
+async function findEnclosingFunctionName(
+  document: vscode.TextDocument,
+  position: vscode.Position,
+): Promise<string> {
+  try {
+    const symbols = await vscode.commands.executeCommand<
+      vscode.DocumentSymbol[]
+    >("vscode.executeDocumentSymbolProvider", document.uri);
+
+    if (!symbols || symbols.length === 0) {
+      return "Function";
+    }
+
+    function searchSymbols(
+      syms: vscode.DocumentSymbol[],
+    ): string | undefined {
+      for (const sym of syms) {
+        if (
+          sym.kind === vscode.SymbolKind.Function ||
+          sym.kind === vscode.SymbolKind.Method ||
+          sym.kind === vscode.SymbolKind.Constructor
+        ) {
+          if (sym.range.contains(position)) {
+            if (sym.children && sym.children.length > 0) {
+              const inner = searchSymbols(sym.children);
+              if (inner) {
+                return inner;
+              }
+            }
+            return sym.name;
+          }
+        }
+        if (sym.children && sym.children.length > 0) {
+          if (sym.range.contains(position)) {
+            const inner = searchSymbols(sym.children);
+            if (inner) {
+              return inner;
+            }
+          }
+        }
+      }
+      return undefined;
+    }
+
+    const name = searchSymbols(symbols);
+    return name || "Function";
+  } catch {
+    return "Function";
+  }
+}
+
+let statusBarItem: vscode.StatusBarItem | undefined;
+let runningTaskCount = 0;
+
+function updateStatusBar() {
+  if (!statusBarItem) {
+    statusBarItem = vscode.window.createStatusBarItem(
+      vscode.StatusBarAlignment.Left,
+      100,
+    );
+    statusBarItem.name = "OpenCode Task";
+  }
+  if (runningTaskCount > 0) {
+    statusBarItem.text = `$(loading~spin) OpenCode`;
+    statusBarItem.tooltip = `${runningTaskCount} OpenCode task(s) running`;
+    statusBarItem.show();
+  } else {
+    statusBarItem.hide();
+  }
+}
+
 
 async function runCompleteFunction(
   provider: OpenCodeProvider,
@@ -13,6 +91,11 @@ async function runCompleteFunction(
   }
 
   const document = editor.document;
+
+  if (document.isDirty) {
+    await document.save();
+  }
+
   const position = editor.selection.active;
   const lineText = document.lineAt(position.line).text.trim();
 
@@ -26,8 +109,7 @@ async function runCompleteFunction(
   const filePath = vscode.workspace.asRelativePath(document.uri);
   const lineNumber = position.line + 1;
 
-  const functionNameMatch = lineText.match(/([a-zA-Z_$][0-9a-zA-Z_$]*)\s*\(/);
-  const functionName = functionNameMatch ? functionNameMatch[1] : "Function";
+  const functionName = await findEnclosingFunctionName(document, position);
 
   let message = `File: ${filePath}, Line: ${lineNumber}, Content: ${lineText}`;
   if (additionalPrompt) {
@@ -39,12 +121,15 @@ async function runCompleteFunction(
     config.get<string>("model") || "google/gemini-3.1-pro-preview";
 
   const taskId = Date.now().toString();
+  const now = Date.now();
   const taskItem = new TaskItem(
     taskId,
     functionName,
     document.uri.fsPath,
     lineNumber,
     "running",
+    undefined,
+    now,
   );
 
   const workspaceFolder = vscode.workspace.workspaceFolders?.[0];
@@ -75,15 +160,39 @@ async function runCompleteFunction(
   };
 
   provider.addTask(taskItem);
+  runningTaskCount++;
+  updateStatusBar();
 
   vscode.tasks.executeTask(task).then((execution) => {
     taskItem.execution = execution;
   });
 }
 
+function persistTasks(
+  context: vscode.ExtensionContext,
+  provider: OpenCodeProvider,
+) {
+  const data = provider.getPersistedTasks();
+  context.globalState.update(PERSISTED_TASKS_KEY, data);
+}
+
 export function activate(context: vscode.ExtensionContext) {
   const provider = new OpenCodeProvider();
+
+  const persisted = context.globalState.get<PersistedTaskItem[]>(
+    PERSISTED_TASKS_KEY,
+    [],
+  );
+  if (persisted.length > 0) {
+    provider.loadFromPersisted(persisted);
+  }
+
+  provider.onTasksChanged(() => {
+    persistTasks(context, provider);
+  });
+
   vscode.window.registerTreeDataProvider("opencode.tasks", provider);
+
 
   let disposableComplete = vscode.commands.registerCommand(
     "opencode.completeFunction",
@@ -106,12 +215,18 @@ export function activate(context: vscode.ExtensionContext) {
     },
   );
 
-  let disposableTaskEnd = vscode.tasks.onDidEndTask((e) => {
+  let disposableTaskEndProcess = vscode.tasks.onDidEndTaskProcess((e) => {
     if (e.execution.task.definition.type === "opencode") {
       const taskId = e.execution.task.definition.taskId;
       const taskItem = provider.getTasks().find((t) => t.id === taskId);
       if (taskItem && taskItem.status === "running") {
-        provider.updateTaskStatus(taskItem, "completed");
+        if (e.exitCode !== undefined && e.exitCode > 0) {
+          provider.updateTaskStatus(taskItem, "failed");
+        } else {
+          provider.updateTaskStatus(taskItem, "completed");
+        }
+        runningTaskCount = Math.max(0, runningTaskCount - 1);
+        updateStatusBar();
       }
     }
   });
@@ -152,7 +267,16 @@ export function activate(context: vscode.ExtensionContext) {
       if (item.execution) {
         item.execution.terminate();
         provider.updateTaskStatus(item, "cancelled");
+        runningTaskCount = Math.max(0, runningTaskCount - 1);
+        updateStatusBar();
       }
+    },
+  );
+
+  let disposableClearCompleted = vscode.commands.registerCommand(
+    "opencode.clearCompletedTasks",
+    () => {
+      provider.removeCompletedTasks();
     },
   );
 
@@ -197,10 +321,11 @@ export function activate(context: vscode.ExtensionContext) {
   context.subscriptions.push(
     disposableComplete,
     disposableCompleteWithPrompt,
-    disposableTaskEnd,
+    disposableTaskEndProcess,
     disposableShowOutput,
     disposableJump,
     disposableCancel,
+    disposableClearCompleted,
     disposableSelectModel,
   );
 }

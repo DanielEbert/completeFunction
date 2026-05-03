@@ -67,12 +67,22 @@
         "command": "opencode.selectModel",
         "title": "Select Model",
         "icon": "$(hubot)"
+      },
+      {
+        "command": "opencode.clearCompletedTasks",
+        "title": "Clear Completed",
+        "icon": "$(trash)"
       }
     ],
     "menus": {
       "view/title": [
         {
           "command": "opencode.selectModel",
+          "when": "view == opencode.tasks",
+          "group": "navigation"
+        },
+        {
+          "command": "opencode.clearCompletedTasks",
           "when": "view == opencode.tasks",
           "group": "navigation"
         }
@@ -86,6 +96,18 @@
           "command": "opencode.cancelTask",
           "when": "view == opencode.tasks && viewItem == running",
           "group": "inline"
+        }
+      ],
+      "editor/context": [
+        {
+          "command": "opencode.completeFunction",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "opencode@1"
+        },
+        {
+          "command": "opencode.completeFunctionWithPrompt",
+          "when": "editorTextFocus && resourceScheme == file",
+          "group": "opencode@2"
         }
       ]
     },
