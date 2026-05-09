@@ -246,19 +246,22 @@ async function runCompleteFunction(provider: OpenCodeProvider, additionalPrompt?
   }
 
   const position = editor.selection.active;
-  const lineText = document.lineAt(position.line).text.trim();
 
-  if (!lineText) {
-    vscode.window.showWarningMessage("The current line is empty. Please place your cursor on a function signature.");
-    return;
-  }
+  const fileContent = document.getText();
+  const lineText = document.lineAt(position.line).text.trim();
 
   const filePath = vscode.workspace.asRelativePath(document.uri);
   const lineNumber = position.line + 1;
 
   const functionName = await findEnclosingFunctionName(document, position);
 
-  let message = `File: ${filePath}, Line: ${lineNumber}, Content: ${lineText}`;
+  let message = `
+Implement File: ${filePath}, Line: ${lineNumber}, Line Content: ${lineText}
+
+File ${filePath} content:
+${fileContent}
+`;
+
   if (additionalPrompt) {
     message += `\nAdditional Instructions: ${additionalPrompt}`;
   }
